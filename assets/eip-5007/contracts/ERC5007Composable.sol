@@ -4,15 +4,19 @@ import "./ERC5007.sol";
 import "./IERC5007Composable.sol";
 
 abstract contract ERC5007Composable is ERC5007, IERC5007Composable {
-    mapping(uint256 => uint256) internal _assetIdMapping;
+    mapping(uint256 => uint256) internal _rootIdMapping;
 
     /**
-     * @dev See {IERC5007Composable-assetId}.
+     * @dev See {IERC5007Composable-rootTokenId}.
      */
-    function assetId(uint256 tokenId) public view returns (uint256)
+    function rootTokenId(uint256 tokenId)
+        public
+        view
+        override
+        returns (uint256 rootId)
     {
         require(_exists(tokenId), "ERC5007: invalid tokenId");
-        return _assetIdMapping[tokenId];
+        rootId = _rootIdMapping[tokenId];
     }
 
     /**
@@ -20,40 +24,33 @@ abstract contract ERC5007Composable is ERC5007, IERC5007Composable {
      */
     function split(
         uint256 oldTokenId,
-        uint256 newToken1Id,
-        address newToken1Owner,
-        uint256 newToken2Id,
-        address newToken2Owner,        
-        uint64 splitTime
+        uint256 newTokenId,
+        address newTokenOwner,
+        int64 newTokenStartTime
     ) public virtual override {
-        require(_isApprovedOrOwner(_msgSender(), oldTokenId), "ERC5007: caller is not owner nor approved");
-
-        uint64 oldTokenStartTime = _timeNftMapping[oldTokenId].startTime;
-        uint64 oldTokenEndTime = _timeNftMapping[oldTokenId].endTime;
         require(
-            oldTokenStartTime <= splitTime &&
-                splitTime < oldTokenEndTime,
+            _isApprovedOrOwner(_msgSender(), oldTokenId),
+            "ERC5007: caller is not owner nor approved"
+        );
+
+        int64 oldTokenStartTime = _timeNftMapping[oldTokenId].startTime;
+        int64 oldTokenEndTime = _timeNftMapping[oldTokenId].endTime;
+        require(
+            oldTokenStartTime < newTokenStartTime &&
+                newTokenStartTime <= oldTokenEndTime,
             "ERC5007: invalid newTokenStartTime"
         );
 
-        uint256 assetId_ = _assetIdMapping[oldTokenId];
-        _mintTimeNftWithAssetId(
-            newToken1Owner,
-            newToken1Id,
-            assetId_,
-            oldTokenStartTime,
-            splitTime
-        );
+        _timeNftMapping[oldTokenId].endTime = newTokenStartTime - 1;
+        int64 newTokenEndTime = oldTokenEndTime;
 
-        _mintTimeNftWithAssetId(
-            newToken2Owner,
-            newToken2Id,
-            assetId_,
-            splitTime + 1,
-            oldTokenEndTime
+        _mintTimeNftWithRootId(
+            newTokenOwner,
+            newTokenId,
+            _rootIdMapping[oldTokenId],
+            newTokenStartTime,
+            newTokenEndTime
         );
-
-         _burn(oldTokenId);
     }
 
     /**
@@ -74,17 +71,18 @@ abstract contract ERC5007Composable is ERC5007, IERC5007Composable {
         TimeNftInfo memory firstToken = _timeNftMapping[firstTokenId];
         TimeNftInfo memory secondToken = _timeNftMapping[secondTokenId];
         require(
-            _assetIdMapping[firstTokenId] == _assetIdMapping[secondTokenId] &&
+            _rootIdMapping[firstTokenId] == _rootIdMapping[secondTokenId] &&
                 firstToken.startTime <= firstToken.endTime &&
                 (firstToken.endTime + 1) == secondToken.startTime &&
                 secondToken.startTime <= secondToken.endTime,
-            "ERC5007: invalid data"
+            "ERC5007: invalid input data"
         );
+
         
-        _mintTimeNftWithAssetId(
+        _mintTimeNftWithRootId(
             newTokenOwner,
             newTokenId,
-            _assetIdMapping[firstTokenId],
+            _rootIdMapping[firstTokenId],
             firstToken.startTime,
             secondToken.endTime
         );
@@ -103,15 +101,36 @@ abstract contract ERC5007Composable is ERC5007, IERC5007Composable {
      * - `rootId_` must exist.
      * - `endTime_` should be equal or greater than `startTime_`
      */
-    function _mintTimeNftWithAssetId(
+    function _mintTimeNftWithRootId(
         address to_,
         uint256 tokenId_,
-        uint256 assetId_,
-        uint64 startTime_,
-        uint64 endTime_
+        uint256 rootId_,
+        int64 startTime_,
+        int64 endTime_
     ) internal virtual {
+        require(_exists(rootId_), "ERC5007: invalid rootId_");
         super._mintTimeNft(to_, tokenId_, startTime_, endTime_);
-        _assetIdMapping[tokenId_] = assetId_;
+        _rootIdMapping[tokenId_] = rootId_;
+    }
+
+    /**
+     * @dev  mint a new common time NFT
+     *
+     * Requirements:
+     *
+     * - `to_` cannot be the zero address.
+     * - `tokenId_` must not exist.
+     * - `endTime_` should be equal or greater than `startTime_`
+     */
+    function _mintTimeNft(
+        address to_,
+        uint256 tokenId_,
+        int64 startTime_,
+        int64 endTime_
+    ) internal virtual override {
+        super._mintTimeNft(to_, tokenId_, startTime_, endTime_);
+
+        _rootIdMapping[tokenId_] = tokenId_;
     }
 
     /**
@@ -124,7 +143,7 @@ abstract contract ERC5007Composable is ERC5007, IERC5007Composable {
      */
     function _burn(uint256 tokenId) internal virtual override {
         super._burn(tokenId);
-        delete _assetIdMapping[tokenId];
+        delete _rootIdMapping[tokenId];
     }
 
     /**

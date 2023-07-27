@@ -1,5 +1,5 @@
 {
-  "name": "erc-6059",
+  "name": "nestable-tokens",
   "dependencies": {
     "@openzeppelin/contracts": "^4.6.0"
   },
